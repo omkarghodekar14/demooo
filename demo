@@ -1,0 +1,124 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+
+  required_version = ">= 1.4"
+}
+
+provider "aws" {
+  region = "ap-south-1"  # Change if needed
+}
+
+data "aws_ssm_parameter" "vpc_id" {
+  name = "/vpc/id"
+}
+
+data "aws_ssm_parameter" "private_subnets" {
+  name = "/vpc/private_subnet_ids"
+}
+
+data "aws_ssm_parameter" "public_subnets" {
+  name = "/vpc/public_subnet_ids"
+}
+
+locals {
+  vpc_id           = data.aws_ssm_parameter.vpc_id.value
+  private_subnets  = split(",", data.aws_ssm_parameter.private_subnets.value)
+  public_subnets   = split(",", data.aws_ssm_parameter.public_subnets.value)
+}
+
+# ----------------------------------------
+# EBS CSI IRSA Role
+# ----------------------------------------
+module "ebs_csi_irsa" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
+  version = "5.34.0"
+
+  role_name_prefix = "ebs-csi"
+
+  attach_ebs_csi_policy = true
+
+  oidc_providers = {
+    main = {
+      provider_arn               = module.eks.oidc_provider_arn
+      namespace_service_accounts = ["kube-system:ebs-csi-controller-sa"]
+    }
+  }
+}
+
+# ----------------------------------------
+# EFS CSI IRSA Role
+# ----------------------------------------
+module "efs_csi_irsa" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
+  version = "5.34.0"
+
+  role_name_prefix = "efs-csi"
+
+  attach_efs_csi_policy = true
+
+  oidc_providers = {
+    main = {
+      provider_arn               = module.eks.oidc_provider_arn
+      namespace_service_accounts = ["kube-system:efs-csi-controller-sa"]
+    }
+  }
+}
+
+# ----------------------------------------
+# EKS Cluster
+# ----------------------------------------
+module "eks" {
+  source  = "terraform-aws-modules/eks/aws"
+  version = "20.8.5"
+
+  cluster_name    = "my-cluster"
+  cluster_version = "1.29"
+
+  subnet_ids = local.private_subnets
+  vpc_id     = local.vpc_id
+
+  enable_irsa = true
+
+  cluster_addons = {
+    coredns = {
+      most_recent = true
+    }
+
+    kube-proxy = {
+      most_recent = true
+    }
+
+    vpc-cni = {
+      most_recent = true
+    }
+
+    ebs-csi-driver = {
+      most_recent              = true
+      service_account_role_arn = module.ebs_csi_irsa.iam_role_arn
+    }
+
+    efs-csi-driver = {
+      most_recent              = true
+      service_account_role_arn = module.efs_csi_irsa.iam_role_arn
+    }
+
+    metrics-server = {
+      most_recent = true
+    }
+  }
+
+  eks_managed_node_groups = {
+    default = {
+      instance_types = ["t3.medium"]
+      min_size       = 1
+      max_size       = 3
+      desired_size   = 2
+      subnet_ids     = local.private_subnets
+    }
+  }
+}
