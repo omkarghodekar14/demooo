@@ -1,0 +1,19 @@
+resource "aws_eks_addon" "ebs" {
+  cluster_name             = module.eks.cluster_name
+  addon_name               = "ebs-csi-driver"
+  addon_version            = "v1.28.0-eksbuild.1" # or let it be empty for most recent
+  resolve_conflicts        = "OVERWRITE"
+  service_account_role_arn = module.ebs_irsa.iam_role_arn
+
+  depends_on = [module.ebs_irsa]
+}
+
+resource "aws_eks_addon" "efs" {
+  cluster_name             = module.eks.cluster_name
+  addon_name               = "efs-csi-driver"
+  addon_version            = "v1.28.0-eksbuild.1"
+  resolve_conflicts        = "OVERWRITE"
+  service_account_role_arn = module.efs_irsa.iam_role_arn
+
+  depends_on = [module.efs_irsa]
+}
