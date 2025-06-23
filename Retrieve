@@ -1,0 +1,39 @@
+terraform {
+  required_providers {
+    gitlab = {
+      source  = "gitlabhq/gitlab"
+      version = "~> 15.10"
+    }
+  }
+}
+
+provider "gitlab" {
+  token    = var.gitlab_token
+  base_url = "https://gitlab.com/api/v4/"  # Change if using self-hosted GitLab
+}
+
+variable "gitlab_token" {
+  type        = string
+  sensitive   = true
+  description = "GitLab Personal Access Token with read_api scope"
+}
+
+variable "project_path" {
+  type        = string
+  description = "The path_with_namespace of the GitLab project, e.g., 'mygroup/myproject'"
+}
+
+# Fetch project by path
+data "gitlab_project" "selected" {
+  path_with_namespace = var.project_path
+}
+
+# Retrieve all project-level variables
+data "gitlab_project_variables" "all_vars" {
+  project = data.gitlab_project.selected.id
+}
+
+# Output all variables (may not show values of masked/protected vars)
+output "gitlab_project_variables" {
+  value = data.gitlab_project_variables.all_vars.variables
+}
