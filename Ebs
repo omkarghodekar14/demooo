@@ -1,0 +1,27 @@
+module "ebs_csi_driver" {
+  source  = "terraform-aws-modules/eks/aws//modules/ebs-csi-driver"
+  version = "~> 20.0"
+
+  cluster_name    = module.eks.cluster_name
+  cluster_version = module.eks.cluster_version
+  subnet_ids      = module.eks.private_subnet_ids
+  vpc_id          = module.eks.vpc_id
+
+  create_irsa = false
+
+  storage_classes = [
+    {
+      name = "gp3"
+      annotations = {
+        "storageclass.kubernetes.io/is-default-class" = "true"
+      }
+      parameters = {
+        type   = "gp3"
+        fsType = "ext4"
+      }
+      reclaim_policy         = "Delete"
+      volume_binding_mode    = "WaitForFirstConsumer"
+      allow_volume_expansion = true
+    }
+  ]
+}
