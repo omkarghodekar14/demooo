@@ -1,27 +1,66 @@
-module "ebs_csi_driver" {
-  source  = "terraform-aws-modules/eks/aws//modules/ebs-csi-driver"
-  version = "~> 20.0"
-
-  cluster_name    = module.eks.cluster_name
-  cluster_version = module.eks.cluster_version
-  subnet_ids      = module.eks.private_subnet_ids
-  vpc_id          = module.eks.vpc_id
-
-  create_irsa = false
-
-  storage_classes = [
-    {
-      name = "gp3"
-      annotations = {
-        "storageclass.kubernetes.io/is-default-class" = "true"
-      }
-      parameters = {
-        type   = "gp3"
-        fsType = "ext4"
-      }
-      reclaim_policy         = "Delete"
-      volume_binding_mode    = "WaitForFirstConsumer"
-      allow_volume_expansion = true
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = ">= 5.0"
     }
-  ]
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = ">= 2.11.0"
+    }
+  }
+}
+
+# ✅ EKS Cluster Auth Token for Kubernetes Provider
+data "aws_eks_cluster_auth" "cluster" {
+  name = module.eks.cluster_name
+}
+
+# ✅ Kubernetes Provider Config
+provider "kubernetes" {
+  host                   = module.eks.cluster_endpoint
+  cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+  token                  = data.aws_eks_cluster_auth.cluster.token
+}
+
+# ✅ Patch gp2 to remove it as default using kubernetes_manifest
+resource "kubernetes_manifest" "remove_gp2_default" {
+  manifest = {
+    apiVersion = "storage.k8s.io/v1"
+    kind       = "StorageClass"
+    metadata = {
+      name        = "gp2"
+      annotations = {
+        "storageclass.kubernetes.io/is-default-class" = "false"
+      }
+    }
+    provisioner = "ebs.csi.aws.com"
+  }
+
+  lifecycle {
+    ignore_changes = [manifest["provisioner"]]
+  }
+}
+
+# ✅ Create gp3 StorageClass and make it default
+resource "kubernetes_storage_class" "gp3" {
+  metadata {
+    name = "gp3"
+    annotations = {
+      "storageclass.kubernetes.io/is-default-class" = "true"
+    }
+  }
+
+  provisioner = "ebs.csi.aws.com"
+
+  parameters = {
+    type   = "gp3"
+    fsType = "ext4"
+  }
+
+  reclaim_policy         = "Delete"
+  volume_binding_mode    = "WaitForFirstConsumer"
+  allow_volume_expansion = true
+
+  depends_on = [kubernetes_manifest.remove_gp2_default]
 }
